@@ -163,9 +163,9 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
             inputs=[PortSpec(id="in", label="Video In", media_type="video")],
             outputs=[PortSpec(id="out", label="Video Out", media_type="video")],
             params=[
-                ParamSpec(name="width", label="Target Width (px)", type="integer", default=1920, min=160, max=3840, step=16),
-                ParamSpec(name="height", label="Target Height (px)", type="integer", default=1080, min=120, max=2160, step=16),
-                ParamSpec(name="framerate", label="Target FPS", type="integer", default=30, min=1, max=120, step=1),
+                ParamSpec(name="width", label="Target Width (px)", type="integer", default=1920, min=160, max=3840, step=16, live_updatable=True),
+                ParamSpec(name="height", label="Target Height (px)", type="integer", default=1080, min=120, max=2160, step=16, live_updatable=True),
+                ParamSpec(name="framerate", label="Target FPS", type="integer", default=30, min=1, max=120, step=1, live_updatable=True),
                 ParamSpec(
                     name="method",
                     label="Scaling Method",
@@ -220,7 +220,8 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     label="Timecode Mode",
                     type="select",
                     default="running-time",
-                    description="Choose elapsed pipeline time, stream/buffer timestamp, wall-clock time, or Off.",
+                    live_updatable=True,
+                    description="Switch elapsed time, stream/buffer timestamp, wall-clock time, or Off live.",
                     options=[
                         ParamOption(label="Running Time (Elapsed)", value="running-time"),
                         ParamOption(label="Stream Time", value="stream-time"),
@@ -244,6 +245,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     default="%Y-%m-%d %H:%M:%S",
                     placeholder="%H:%M:%S or %Y-%m-%d %H:%M:%S",
                     description="strftime format used when Timecode Mode is set to Wall Clock.",
+                    live_updatable=True,
                 ),
                 ParamSpec(
                     name="timecode_font_desc",
@@ -289,7 +291,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
             type="video_balance",
             label="Color Balance & Flip",
             category=ConnectorCategory.TRANSFORM,
-            description="Adjusts brightness, contrast, saturation, hue, and orientation.",
+            description="Adjusts brightness, contrast, saturation, hue, and orientation live.",
             gst_elements=["videobalance", "videoflip"],
             inputs=[PortSpec(id="in", label="Video In", media_type="video")],
             outputs=[PortSpec(id="out", label="Video Out", media_type="video")],
@@ -303,6 +305,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     label="Orientation",
                     type="select",
                     default="none",
+                    live_updatable=True,
                     options=[
                         ParamOption(label="None", value="none"),
                         ParamOption(label="Horizontal Flip", value="horizontal-flip"),
@@ -328,15 +331,16 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
             params=[
                 ParamSpec(name="output_width", label="Canvas Width", type="integer", default=1280, min=320, max=3840, step=16),
                 ParamSpec(name="output_height", label="Canvas Height", type="integer", default=720, min=240, max=2160, step=16),
-                ParamSpec(name="pip_x", label="PiP X Offset", type="integer", default=880, min=0, max=3840, step=10),
-                ParamSpec(name="pip_y", label="PiP Y Offset", type="integer", default=460, min=0, max=2160, step=10),
-                ParamSpec(name="pip_width", label="PiP Width", type="integer", default=360, min=64, max=1920, step=8),
-                ParamSpec(name="pip_height", label="PiP Height", type="integer", default=202, min=64, max=1080, step=8),
+                ParamSpec(name="pip_x", label="PiP X Offset", type="integer", default=880, min=0, max=1920, step=10, live_updatable=True),
+                ParamSpec(name="pip_y", label="PiP Y Offset", type="integer", default=460, min=0, max=1080, step=10, live_updatable=True),
+                ParamSpec(name="pip_width", label="PiP Width", type="integer", default=360, min=64, max=1280, step=8, live_updatable=True),
+                ParamSpec(name="pip_height", label="PiP Height", type="integer", default=202, min=64, max=720, step=8, live_updatable=True),
                 ParamSpec(
                     name="background",
                     label="Background",
                     type="select",
                     default="black",
+                    live_updatable=True,
                     options=[
                         ParamOption(label="Black", value="black"),
                         ParamOption(label="Checkerboard", value="checker"),
@@ -380,7 +384,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                         ParamOption(label="VP8 (vp8enc)", value="vp8"),
                     ],
                 ),
-                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=4500, min=300, max=50000, step=100),
+                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=4500, min=300, max=25000, step=100, live_updatable=True),
                 ParamSpec(
                     name="speed_preset",
                     label="Encoder Preset",
@@ -421,7 +425,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     default="rtmp://127.0.0.1:1935/live/stream",
                     placeholder="rtmp://a.rtmp.youtube.com/live2/xxxx",
                 ),
-                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=3500, min=500, max=25000, step=100),
+                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=3500, min=500, max=25000, step=100, live_updatable=True),
                 ParamSpec(name="keyframe_interval", label="Keyframe Interval (frames)", type="integer", default=60, min=15, max=300, step=15),
                 ParamSpec(
                     name="speed_preset",
@@ -464,7 +468,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     ],
                 ),
                 ParamSpec(name="latency", label="SRT Latency (ms)", type="integer", default=125, min=20, max=4000, step=25),
-                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=4000, min=500, max=30000, step=100),
+                ParamSpec(name="bitrate_kbps", label="Bitrate (kbps)", type="integer", default=4000, min=500, max=25000, step=100, live_updatable=True),
             ],
         ),
         ConnectorDefinition(
@@ -478,7 +482,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
             params=[
                 ParamSpec(name="width", label="Preview Width (px)", type="integer", default=640, min=160, max=1280, step=16),
                 ParamSpec(name="fps", label="Preview FPS", type="integer", default=10, min=1, max=30, step=1),
-                ParamSpec(name="quality", label="JPEG Quality", type="integer", default=75, min=20, max=95, step=5),
+                ParamSpec(name="quality", label="JPEG Quality", type="integer", default=75, min=20, max=95, step=5, live_updatable=True),
             ],
         ),
     ]

@@ -213,6 +213,7 @@ class EngineManager:
         self._channels: Dict[str, VirtualChannel] = {}
         self._runners: Dict[str, ChannelRunner] = {}
         self._compiled: Dict[str, CompiledPipeline] = {}
+        self._run_ids: Dict[str, int] = {}
         self._listeners: List[Callable[[str, str], None]] = []
 
         self._load_or_seed()
@@ -295,11 +296,13 @@ class EngineManager:
             runner = self._runners.get(channel_id)
             if runner is not None:
                 telemetry = runner.get_telemetry()
+                telemetry.run_id = self._run_ids.get(channel_id, 0)
                 logs = runner.get_logs()
             else:
                 telemetry = ChannelTelemetry(
                     state=ChannelState.STOPPED,
                     has_preview=len(compiled.preview_sink_names) > 0,
+                    run_id=self._run_ids.get(channel_id, 0),
                 )
                 logs = []
             return ChannelSnapshot(
@@ -345,6 +348,36 @@ class EngineManager:
             if channel_id not in self._channels:
                 raise KeyError(f"Channel '{channel_id}' not found.")
             ch = self._channels[channel_id]
+            old_nodes = {n.id: n for n in ch.nodes}
+            old_edge_sigs = {(e.source, e.source_handle, e.target, e.target_handle) for e in ch.edges}
+            new_edge_sigs = {(e.source, e.source_handle, e.target, e.target_handle) for e in edges}
+
+            # Detect whether topology or any non-live parameter changed
+            needs_restart = (
+                set(old_nodes.keys()) != {n.id for n in nodes}
+                or old_edge_sigs != new_edge_sigs
+            )
+            live_updates: List[tuple[str, str, Any]] = []
+
+            if not needs_restart:
+                for n in nodes:
+                    prev = old_nodes[n.id]
+                    if prev.type != n.type:
+                        needs_restart = True
+                        break
+                    defn = get_connector_definition(n.type)
+                    live_keys = {p.name for p in defn.params if p.live_updatable} if defn else set()
+                    all_keys = set(prev.params.keys()) | set(n.params.keys())
+                    for k in all_keys:
+                        if prev.params.get(k) != n.params.get(k):
+                            if k in live_keys:
+                                live_updates.append((n.id, k, n.params.get(k)))
+                            else:
+                                needs_restart = True
+                                break
+                    if needs_restart:
+                        break
+
             ch.nodes = nodes
             ch.edges = edges
             ch.updated_at = utc_now_iso()
@@ -352,14 +385,20 @@ class EngineManager:
             self._compiled[channel_id] = compiled
             self._persist()
 
-            # If channel is currently running, hot-restart with the newly compiled graph
             existing = self._runners.get(channel_id)
             if existing is not None and existing.get_telemetry().state == ChannelState.RUNNING:
-                existing.stop()
-                if compiled.is_valid:
-                    runner = self._create_runner(ch, compiled)
-                    self._runners[channel_id] = runner
-                    runner.start()
+                if not needs_restart:
+                    # Apply live changes seamlessly without interrupting the stream
+                    existing.channel = ch
+                    for nid, k, v in live_updates:
+                        existing.update_live_param(nid, k, v)
+                else:
+                    existing.stop()
+                    if compiled.is_valid:
+                        self._run_ids[channel_id] = self._run_ids.get(channel_id, 0) + 1
+                        runner = self._create_runner(ch, compiled)
+                        self._runners[channel_id] = runner
+                        runner.start()
 
             self._notify(channel_id, "graph_updated")
             return self.get_snapshot(channel_id)
@@ -390,6 +429,7 @@ class EngineManager:
             runner = self._runners.get(channel_id)
             defn = get_connector_definition(target_node.type)
             if runner is not None and defn is not None:
+                runner.channel = ch
                 live_keys = {p.name for p in defn.params if p.live_updatable}
                 for k, v in params.items():
                     if k in live_keys:
@@ -406,6 +446,7 @@ class EngineManager:
             self._channels.pop(channel_id, None)
             self._runners.pop(channel_id, None)
             self._compiled.pop(channel_id, None)
+            self._run_ids.pop(channel_id, None)
             self._persist()
             self._notify(channel_id, "deleted")
 
@@ -423,6 +464,7 @@ class EngineManager:
             if existing is not None:
                 existing.stop()
 
+            self._run_ids[channel_id] = self._run_ids.get(channel_id, 0) + 1
             runner = self._create_runner(ch, compiled)
             self._runners[channel_id] = runner
             runner.start()

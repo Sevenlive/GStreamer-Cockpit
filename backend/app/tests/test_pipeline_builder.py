@@ -137,17 +137,19 @@ class TestPipelineBuilder(unittest.TestCase):
         compiled_clk = compile_channel_pipeline(ch_clock, self.rec_dir)
         self.assertTrue(compiled_clk.is_valid, compiled_clk.validation_errors)
         self.assertIn('text="STUDIO A &amp; B"', compiled_clk.pipeline_description)
-        self.assertIn("clockoverlay name=time_txt1", compiled_clk.pipeline_description)
+        self.assertIn("clockoverlay name=clock_txt1", compiled_clk.pipeline_description)
         self.assertIn('time-format="%H:%M:%S"', compiled_clk.pipeline_description)
         self.assertIn('text="UTC "', compiled_clk.pipeline_description)
         self.assertIn("valignment=top halignment=right", compiled_clk.pipeline_description)
+        self.assertIn("silent=false", compiled_clk.pipeline_description)
 
-        # Off mode -> no timeoverlay or clockoverlay
+        # Off mode -> both timeoverlay and clockoverlay stay in pipeline with silent=true for live switching
         ch_clock.nodes[1].params["timecode_mode"] = "off"
         compiled_off = compile_channel_pipeline(ch_clock, self.rec_dir)
         self.assertTrue(compiled_off.is_valid)
-        self.assertNotIn("timeoverlay", compiled_off.pipeline_description)
-        self.assertNotIn("clockoverlay", compiled_off.pipeline_description)
+        self.assertIn("timeoverlay name=time_txt1", compiled_off.pipeline_description)
+        self.assertIn("clockoverlay name=clock_txt1", compiled_off.pipeline_description)
+        self.assertEqual(compiled_off.pipeline_description.count("silent=true"), 2)
 
     def test_web_preview_preserves_feed_aspect_ratio(self) -> None:
         # 4:3 source -> 640x480 preview

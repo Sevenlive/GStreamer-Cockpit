@@ -80,6 +80,7 @@ export interface ChannelTelemetry {
   has_preview: boolean;
   preview_width?: number | null;
   preview_height?: number | null;
+  run_id: number;
   error_message?: string | null;
 }
 

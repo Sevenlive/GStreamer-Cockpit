@@ -126,10 +126,10 @@ export const PipelineDrawer: React.FC<PipelineDrawerProps> = ({ snapshot }) => {
               >
                 {isRunning && snapshot.telemetry.has_preview ? (
                   <img
-                    key={`${snapshot.channel.id}-${snapshot.channel.updated_at}`}
+                    key={`${snapshot.channel.id}-${snapshot.telemetry.run_id}`}
                     src={api.previewStreamUrl(
                       snapshot.channel.id,
-                      snapshot.channel.updated_at
+                      snapshot.telemetry.run_id
                     )}
                     alt={`${snapshot.channel.name} monitor`}
                   />

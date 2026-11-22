@@ -147,6 +147,26 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
           }
 
           if (spec.type === "integer" || spec.type === "number") {
+            const hasRange =
+              spec.live_updatable &&
+              spec.min !== null &&
+              spec.min !== undefined &&
+              spec.max !== null &&
+              spec.max !== undefined;
+            const stepVal = spec.step ?? (spec.type === "integer" ? 1 : 0.05);
+            const handleNumChange = (raw: string) => {
+              const parsed =
+                spec.type === "integer" ? parseInt(raw, 10) : parseFloat(raw);
+              if (!Number.isNaN(parsed)) {
+                onChangeParam(
+                  selectedNode.id,
+                  spec.name,
+                  parsed,
+                  spec.live_updatable
+                );
+              }
+            };
+
             return (
               <div key={spec.name} className="form-field">
                 <div className="form-label-row">
@@ -157,6 +177,18 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                     <span className="live-tag">LIVE</span>
                   )}
                 </div>
+                {hasRange && (
+                  <input
+                    type="range"
+                    aria-label={`${spec.label} slider`}
+                    value={Number(val)}
+                    min={spec.min as number}
+                    max={spec.max as number}
+                    step={stepVal}
+                    style={{ width: "100%", accentColor: "var(--accent-input)" }}
+                    onChange={(e) => handleNumChange(e.target.value)}
+                  />
+                )}
                 <input
                   id={fieldId}
                   type="number"
@@ -164,21 +196,8 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                   value={Number(val)}
                   min={spec.min ?? undefined}
                   max={spec.max ?? undefined}
-                  step={spec.step ?? (spec.type === "integer" ? 1 : 0.05)}
-                  onChange={(e) => {
-                    const parsed =
-                      spec.type === "integer"
-                        ? parseInt(e.target.value, 10)
-                        : parseFloat(e.target.value);
-                    if (!Number.isNaN(parsed)) {
-                      onChangeParam(
-                        selectedNode.id,
-                        spec.name,
-                        parsed,
-                        spec.live_updatable
-                      );
-                    }
-                  }}
+                  step={stepVal}
+                  onChange={(e) => handleNumChange(e.target.value)}
                 />
                 {spec.description && (
                   <span className="form-help">{spec.description}</span>

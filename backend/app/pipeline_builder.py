@@ -217,7 +217,7 @@ def _build_node_snippet(
         return (
             f"videoconvert ! videoscale name={el_name} method={method} ! "
             f"videorate ! "
-            f"video/x-raw,width={w},height={h},framerate={fps}/1 ! "
+            f"capsfilter name=caps_{sid} caps=\"video/x-raw,width={w},height={h},framerate={fps}/1\" ! "
             f"videoconvert"
         )
 
@@ -243,28 +243,31 @@ def _build_node_snippet(
         if "timecode_mode" not in node.params and "show_timecode" in node.params:
             tc_mode = "running-time" if bool(node.params["show_timecode"]) else "off"
 
-        if tc_mode != "off":
-            tc_font = _gst_quote(
-                str(params.get("timecode_font_desc") or "DejaVu Sans Mono Bold 18").replace(",", "")
-            )
-            tc_valign = str(params.get("timecode_valignment", "bottom"))
-            tc_halign = str(params.get("timecode_halignment", "right"))
-            tc_shaded = _bool_str(bool(params.get("timecode_shaded", True)))
-            tc_prefix = _gst_quote(html.escape(str(params.get("timecode_prefix", "TC ")), quote=False))
+        tc_font = _gst_quote(
+            str(params.get("timecode_font_desc") or "DejaVu Sans Mono Bold 18").replace(",", "")
+        )
+        tc_valign = str(params.get("timecode_valignment", "bottom"))
+        tc_halign = str(params.get("timecode_halignment", "right"))
+        tc_shaded = _bool_str(bool(params.get("timecode_shaded", True)))
+        tc_prefix = _gst_quote(html.escape(str(params.get("timecode_prefix", "TC ")), quote=False))
+        tc_fmt = _gst_quote(str(params.get("timecode_format", "%Y-%m-%d %H:%M:%S")))
 
-            if tc_mode == "clock":
-                tc_fmt = _gst_quote(str(params.get("timecode_format", "%Y-%m-%d %H:%M:%S")))
-                chain.append(
-                    f"clockoverlay name=time_{sid} time-format={tc_fmt} text={tc_prefix} "
-                    f"valignment={tc_valign} halignment={tc_halign} "
-                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent=false"
-                )
-            else:
-                chain.append(
-                    f"timeoverlay name=time_{sid} time-mode={tc_mode} text={tc_prefix} "
-                    f"valignment={tc_valign} halignment={tc_halign} "
-                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent=false"
-                )
+        # Include both timeoverlay and clockoverlay with silent flags so timecode_mode
+        # can be switched between running-time, stream-time, buffer-time, clock, and off LIVE!
+        time_silent = _bool_str(tc_mode in ("off", "clock"))
+        clock_silent = _bool_str(tc_mode != "clock")
+        effective_time_mode = tc_mode if tc_mode in ("running-time", "stream-time", "buffer-time") else "running-time"
+
+        chain.append(
+            f"timeoverlay name=time_{sid} time-mode={effective_time_mode} text={tc_prefix} "
+            f"valignment={tc_valign} halignment={tc_halign} "
+            f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent={time_silent}"
+        )
+        chain.append(
+            f"clockoverlay name=clock_{sid} time-format={tc_fmt} text={tc_prefix} "
+            f"valignment={tc_valign} halignment={tc_halign} "
+            f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent={clock_silent}"
+        )
 
         # Force plain video/x-raw without GstVideoOverlayCompositionMeta so text is always
         # blended directly into frame pixels before tee, videoscale, jpegenc, or encoders.
@@ -280,14 +283,14 @@ def _build_node_snippet(
         saturation = float(params["saturation"])
         hue = float(params["hue"])
         flip = str(params["flip_method"])
+        # Always include videoflip (passthrough when method=none) so orientation changes live!
         chain = [
             "videoconvert",
             f"videobalance name={el_name} brightness={brightness:.2f} "
             f"contrast={contrast:.2f} saturation={saturation:.2f} hue={hue:.2f}",
+            f"videoflip name=flip_{sid} method={flip}",
+            "videoconvert",
         ]
-        if flip != "none":
-            chain.append(f"videoflip name=flip_{sid} method={flip}")
-        chain.append("videoconvert")
         return " ! ".join(chain)
 
     if t == "compositor":
@@ -320,11 +323,11 @@ def _build_node_snippet(
 
         out_path = recordings_dir / filename
         if codec == "h264":
-            enc = f"x264enc bitrate={bitrate} speed-preset={preset} tune=zerolatency ! h264parse"
+            enc = f"x264enc name=enc_{sid} bitrate={bitrate} speed-preset={preset} tune=zerolatency ! h264parse"
         elif codec == "h265":
-            enc = f"x265enc bitrate={bitrate} speed-preset={preset} ! h265parse"
+            enc = f"x265enc name=enc_{sid} bitrate={bitrate} speed-preset={preset} ! h265parse"
         else:
-            enc = f"vp8enc target-bitrate={bitrate * 1000}"
+            enc = f"vp8enc name=enc_{sid} target-bitrate={bitrate * 1000}"
 
         mux_map = {"mp4": "mp4mux", "mkv": "matroskamux", "ts": "mpegtsmux"}
         mux = mux_map.get(container, "mp4mux")
@@ -353,7 +356,7 @@ def _build_node_snippet(
         preset = str(params["speed_preset"])
         return (
             f"videoconvert ! "
-            f"x264enc bitrate={bitrate} key-int-max={kf} speed-preset={preset} tune=zerolatency ! "
+            f"x264enc name=enc_{sid} bitrate={bitrate} key-int-max={kf} speed-preset={preset} tune=zerolatency ! "
             f"h264parse ! flvmux streamable=true ! "
             f"rtmp2sink name={el_name} location={loc}"
         )
@@ -370,7 +373,7 @@ def _build_node_snippet(
             uri = f"{uri}{sep}mode={mode}"
         return (
             f"videoconvert ! "
-            f"x264enc bitrate={bitrate} speed-preset=veryfast tune=zerolatency ! "
+            f"x264enc name=enc_{sid} bitrate={bitrate} speed-preset=veryfast tune=zerolatency ! "
             f"h264parse ! mpegtsmux ! "
             f"srtsink name={el_name} uri={_gst_quote(uri)} latency={latency}"
         )
@@ -395,7 +398,7 @@ def _build_node_snippet(
             scale_chain = f"videoconvert ! videorate ! video/x-raw,framerate={fps}/1"
         return (
             f"{scale_chain} ! "
-            f"jpegenc quality={quality} ! "
+            f"jpegenc name=jpeg_{sid} quality={quality} ! "
             f"appsink name={el_name} emit-signals=true max-buffers=2 drop=true sync=false"
         )
 

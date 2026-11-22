@@ -231,32 +231,135 @@ class GstChannelRunner(ChannelRunner):
         if not el_name:
             return False
 
-        gst_prop = param_name.replace("_", "-")
-        # Route timecode_* parameters to the companion timeoverlay/clockoverlay element
-        if param_name.startswith("timecode_") and el_name.startswith("text_"):
-            el_name = "time_" + el_name[len("text_"):]
-            tc_prop_map = {
-                "timecode_prefix": "text",
-                "timecode_font_desc": "font-desc",
-                "timecode_valignment": "valignment",
-                "timecode_halignment": "halignment",
-                "timecode_shaded": "shaded-background",
-            }
-            gst_prop = tc_prop_map.get(param_name, gst_prop)
+        # Extract sanitized node suffix (e.g. "text_tr_overlay" -> "tr_overlay")
+        sid = el_name.split("_", 1)[1] if "_" in el_name else el_name
+        node = next((n for n in self.channel.nodes if n.id == node_id), None)
 
-        element = self._pipeline.get_by_name(el_name)
-        if element is None:
-            return False
-        if gst_prop == "text" and isinstance(value, str):
-            value = html.escape(value, quote=False)
-        elif gst_prop == "font-desc" and isinstance(value, str):
-            value = value.replace(",", "")
         try:
-            element.set_property(gst_prop, value)
-            self._log(LogLevel.INFO, el_name, f"Live updated {gst_prop}={value!r}")
+            # 1. Text & Timecode Overlay (text_<sid>, time_<sid>, clock_<sid>)
+            if el_name.startswith("text_") and param_name.startswith("timecode_"):
+                time_el = self._pipeline.get_by_name(f"time_{sid}")
+                clock_el = self._pipeline.get_by_name(f"clock_{sid}")
+
+                if param_name == "timecode_mode":
+                    mode = str(value)
+                    if time_el is not None:
+                        time_el.set_property("silent", mode in ("off", "clock"))
+                        if mode in ("running-time", "stream-time", "buffer-time"):
+                            time_el.set_property("time-mode", mode)
+                    if clock_el is not None:
+                        clock_el.set_property("silent", mode != "clock")
+                    self._log(LogLevel.INFO, f"time_{sid}", f"Live switched timecode_mode={mode!r}")
+                    return True
+
+                if param_name == "timecode_format":
+                    if clock_el is not None:
+                        clock_el.set_property("time-format", str(value))
+                        self._log(LogLevel.INFO, f"clock_{sid}", f"Live updated time-format={value!r}")
+                        return True
+                    return False
+
+                tc_prop_map = {
+                    "timecode_prefix": "text",
+                    "timecode_font_desc": "font-desc",
+                    "timecode_valignment": "valignment",
+                    "timecode_halignment": "halignment",
+                    "timecode_shaded": "shaded-background",
+                }
+                gst_prop = tc_prop_map.get(param_name)
+                if not gst_prop:
+                    return False
+                prop_val = value
+                if gst_prop == "text" and isinstance(prop_val, str):
+                    prop_val = html.escape(prop_val, quote=False)
+                elif gst_prop == "font-desc" and isinstance(prop_val, str):
+                    prop_val = prop_val.replace(",", "")
+                updated_any = False
+                for target_el in (time_el, clock_el):
+                    if target_el is not None:
+                        target_el.set_property(gst_prop, prop_val)
+                        updated_any = True
+                if updated_any:
+                    self._log(LogLevel.INFO, f"time_{sid}", f"Live updated {gst_prop}={prop_val!r}")
+                return updated_any
+
+            # 2. Video Balance & Flip (bal_<sid>, flip_<sid>)
+            if el_name.startswith("bal_") and param_name == "flip_method":
+                flip_el = self._pipeline.get_by_name(f"flip_{sid}")
+                if flip_el is None:
+                    return False
+                flip_el.set_property("method", str(value))
+                self._log(LogLevel.INFO, f"flip_{sid}", f"Live updated method={value!r}")
+                return True
+
+            # 3. PiP Compositor pad properties (comp_<sid>.sink_1)
+            if el_name.startswith("comp_") and param_name in ("pip_x", "pip_y", "pip_width", "pip_height"):
+                comp_el = self._pipeline.get_by_name(el_name)
+                if comp_el is None:
+                    return False
+                pad = comp_el.get_static_pad("sink_1")
+                if pad is None:
+                    return False
+                pad_prop = {
+                    "pip_x": "xpos",
+                    "pip_y": "ypos",
+                    "pip_width": "width",
+                    "pip_height": "height",
+                }[param_name]
+                pad.set_property(pad_prop, int(value))
+                self._log(LogLevel.INFO, f"{el_name}.sink_1", f"Live updated {pad_prop}={int(value)}")
+                return True
+
+            # 4. Video Scale live capsfilter update (caps_<sid>)
+            if el_name.startswith("scale_") and param_name in ("width", "height", "framerate") and node is not None:
+                caps_el = self._pipeline.get_by_name(f"caps_{sid}")
+                if caps_el is None:
+                    return False
+                w = int(value if param_name == "width" else node.params.get("width", 1920))
+                h = int(value if param_name == "height" else node.params.get("height", 1080))
+                fps = int(value if param_name == "framerate" else node.params.get("framerate", 30))
+                caps_str = f"video/x-raw,width={w},height={h},framerate={fps}/1"
+                caps_el.set_property("caps", Gst.Caps.from_string(caps_str))
+                self._log(LogLevel.INFO, f"caps_{sid}", f"Live updated caps={caps_str}")
+                return True
+
+            # 5. Output Encoder live bitrate (enc_<sid>)
+            if param_name == "bitrate_kbps":
+                enc_el = self._pipeline.get_by_name(f"enc_{sid}")
+                if enc_el is None:
+                    return False
+                factory_name = enc_el.get_factory().get_name() if enc_el.get_factory() else ""
+                if factory_name == "vp8enc":
+                    enc_el.set_property("target-bitrate", int(value) * 1000)
+                else:
+                    enc_el.set_property("bitrate", int(value))
+                self._log(LogLevel.INFO, f"enc_{sid}", f"Live updated bitrate={int(value)} kbps")
+                return True
+
+            # 6. Web Preview live JPEG quality (jpeg_<sid>)
+            if el_name.startswith("preview_sink_") and param_name == "quality":
+                jpeg_el = self._pipeline.get_by_name(f"jpeg_{sid}")
+                if jpeg_el is None:
+                    return False
+                jpeg_el.set_property("quality", int(value))
+                self._log(LogLevel.INFO, f"jpeg_{sid}", f"Live updated quality={int(value)}")
+                return True
+
+            # 7. Default direct element property update (textoverlay, videobalance, videotestsrc, compositor background)
+            element = self._pipeline.get_by_name(el_name)
+            if element is None:
+                return False
+            gst_prop = param_name.replace("_", "-")
+            prop_val = value
+            if gst_prop == "text" and isinstance(prop_val, str):
+                prop_val = html.escape(prop_val, quote=False)
+            elif gst_prop == "font-desc" and isinstance(prop_val, str):
+                prop_val = prop_val.replace(",", "")
+            element.set_property(gst_prop, prop_val)
+            self._log(LogLevel.INFO, el_name, f"Live updated {gst_prop}={prop_val!r}")
             return True
         except Exception as exc:
-            self._log(LogLevel.WARNING, el_name, f"Live update failed for {gst_prop}: {exc}")
+            self._log(LogLevel.WARNING, el_name, f"Live update failed for {param_name}: {exc}")
             return False
 
     def get_telemetry(self) -> ChannelTelemetry:

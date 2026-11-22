@@ -266,16 +266,18 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
             : n
         )
       );
-      setDirty(true);
-
-      if (
+      const appliedLive = Boolean(
         isLiveUpdatable &&
-        snapshot &&
-        snapshot.telemetry.state === "running"
-      ) {
+          snapshot &&
+          snapshot.telemetry.state === "running"
+      );
+
+      if (appliedLive && snapshot) {
         onLiveUpdateNode(snapshot.channel.id, nodeId, { [paramName]: value }).catch(
           () => {}
         );
+      } else {
+        setDirty(true);
       }
     },
     [setNodes, snapshot, onLiveUpdateNode]

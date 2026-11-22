@@ -118,6 +118,7 @@ class ChannelTelemetry(BaseModel):
     has_preview: bool = False
     preview_width: Optional[int] = None
     preview_height: Optional[int] = None
+    run_id: int = 0
     error_message: Optional[str] = None
 
 
