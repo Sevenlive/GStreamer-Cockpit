@@ -16,7 +16,6 @@ data/
 recordings/
 *.mp4
 *.mkv
-*.ts
 
 # OS / Editor
 .DS_Store
