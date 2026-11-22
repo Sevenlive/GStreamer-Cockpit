@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -232,6 +233,10 @@ class GstChannelRunner(ChannelRunner):
         element = self._pipeline.get_by_name(el_name)
         if element is None:
             return False
+        if gst_prop == "text" and isinstance(value, str):
+            value = html.escape(value, quote=False)
+        elif gst_prop == "font-desc" and isinstance(value, str):
+            value = value.replace(",", "")
         try:
             element.set_property(gst_prop, value)
             self._log(LogLevel.INFO, el_name, f"Live updated {gst_prop}={value!r}")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import os
 import re
 from collections import defaultdict
@@ -185,7 +186,8 @@ def _build_node_snippet(
     if t == "text_overlay":
         el_name = f"text_{sid}"
         node_element_names[node.id] = el_name
-        text = _gst_quote(str(params["text"]))
+        # GStreamer textoverlay parses Pango markup; unescaped &, <, > causes Pango to fail rendering
+        text = _gst_quote(html.escape(str(params["text"]), quote=False))
         font_desc = _gst_quote(str(params.get("font_desc") or "DejaVu Sans Bold 24").replace(",", ""))
         valign = str(params["valignment"])
         halign = str(params["halignment"])
@@ -210,7 +212,7 @@ def _build_node_snippet(
             tc_valign = str(params.get("timecode_valignment", "bottom"))
             tc_halign = str(params.get("timecode_halignment", "right"))
             tc_shaded = _bool_str(bool(params.get("timecode_shaded", True)))
-            tc_prefix = _gst_quote(str(params.get("timecode_prefix", "TC ")))
+            tc_prefix = _gst_quote(html.escape(str(params.get("timecode_prefix", "TC ")), quote=False))
 
             if tc_mode == "clock":
                 tc_fmt = _gst_quote(str(params.get("timecode_format", "%Y-%m-%d %H:%M:%S")))

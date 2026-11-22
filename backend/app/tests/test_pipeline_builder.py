@@ -119,7 +119,7 @@ class TestPipelineBuilder(unittest.TestCase):
                     type="text_overlay",
                     label="Bug",
                     params={
-                        "text": "STUDIO A",
+                        "text": "STUDIO A & B",
                         "timecode_mode": "clock",
                         "timecode_prefix": "UTC ",
                         "timecode_format": "%H:%M:%S",
@@ -136,6 +136,7 @@ class TestPipelineBuilder(unittest.TestCase):
         )
         compiled_clk = compile_channel_pipeline(ch_clock, self.rec_dir)
         self.assertTrue(compiled_clk.is_valid, compiled_clk.validation_errors)
+        self.assertIn('text="STUDIO A &amp; B"', compiled_clk.pipeline_description)
         self.assertIn("clockoverlay name=time_txt1", compiled_clk.pipeline_description)
         self.assertIn('time-format="%H:%M:%S"', compiled_clk.pipeline_description)
         self.assertIn('text="UTC "', compiled_clk.pipeline_description)
