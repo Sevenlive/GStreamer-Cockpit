@@ -137,7 +137,11 @@ class SimChannelRunner(ChannelRunner):
     def _render_preview_frame(self, elapsed: float, frame_idx: int) -> bytes:
         w = int(self._get_node_param("web_preview", "width", 640))
         w = max(240, min(w, 960))
-        h = int(w * 9 / 16)
+        src_w = int(self._get_node_param("video_scale", "width", self._get_node_param("videotestsrc", "width", 1280)))
+        src_h = int(self._get_node_param("video_scale", "height", self._get_node_param("videotestsrc", "height", 720)))
+        h = max(120, int(round(w * src_h / max(1, src_w))) // 2 * 2)
+        self._preview_width = w
+        self._preview_height = h
         quality = int(self._get_node_param("web_preview", "quality", 75))
         pattern = str(self._get_node_param("videotestsrc", "pattern", "smpte"))
 
@@ -267,6 +271,8 @@ class SimChannelRunner(ChannelRunner):
                 dropped_frames=0,
                 active_outputs=self.compiled.active_output_count if self._state == ChannelState.RUNNING else 0,
                 has_preview=len(self.compiled.preview_sink_names) > 0,
+                preview_width=getattr(self, "_preview_width", None),
+                preview_height=getattr(self, "_preview_height", None),
                 error_message=self._error_message,
             )
 

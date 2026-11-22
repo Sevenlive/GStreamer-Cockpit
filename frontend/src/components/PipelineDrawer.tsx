@@ -112,7 +112,18 @@ export const PipelineDrawer: React.FC<PipelineDrawerProps> = ({ snapshot }) => {
 
           {tab === "preview" && (
             <div className="drawer-preview-wrap">
-              <div className="drawer-preview-box">
+              <div
+                className="drawer-preview-box"
+                style={
+                  isRunning &&
+                  snapshot.telemetry.preview_width &&
+                  snapshot.telemetry.preview_height
+                    ? {
+                        aspectRatio: `${snapshot.telemetry.preview_width} / ${snapshot.telemetry.preview_height}`,
+                      }
+                    : undefined
+                }
+              >
                 {isRunning && snapshot.telemetry.has_preview ? (
                   <img
                     key={`${snapshot.channel.id}-${snapshot.channel.updated_at}`}

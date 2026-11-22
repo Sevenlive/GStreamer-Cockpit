@@ -116,6 +116,8 @@ class ChannelTelemetry(BaseModel):
     dropped_frames: int = 0
     active_outputs: int = 0
     has_preview: bool = False
+    preview_width: Optional[int] = None
+    preview_height: Optional[int] = None
     error_message: Optional[str] = None
 
 

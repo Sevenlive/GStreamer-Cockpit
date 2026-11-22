@@ -69,12 +69,50 @@ def _has_cycle(node_ids: Set[str], adj: Dict[str, List[str]]) -> bool:
     return False
 
 
+def _infer_upstream_dimensions(
+    node_id: str,
+    node_map: Dict[str, ConnectorNode],
+    incoming: Dict[str, List[ConnectorEdge]],
+) -> Optional[Tuple[int, int]]:
+    """Walk upstream to infer the active video frame (width, height) feeding a node."""
+    visited: Set[str] = set()
+    curr = node_id
+    swap_axes = False
+
+    while True:
+        inc = incoming.get(curr, [])
+        if not inc:
+            return None
+        prev_id = inc[0].source
+        if prev_id in visited or prev_id not in node_map:
+            return None
+        visited.add(prev_id)
+        prev = node_map[prev_id]
+        params = resolve_node_params(prev.type, prev.params)
+
+        if prev.type == "video_balance":
+            if str(params.get("flip_method", "none")) in ("clockwise", "counterclockwise"):
+                swap_axes = not swap_axes
+        elif prev.type == "video_scale":
+            w, h = int(params["width"]), int(params["height"])
+            return (h, w) if swap_axes else (w, h)
+        elif prev.type == "compositor":
+            w, h = int(params["output_width"]), int(params["output_height"])
+            return (h, w) if swap_axes else (w, h)
+        elif prev.type == "videotestsrc":
+            w, h = int(params["width"]), int(params["height"])
+            return (h, w) if swap_axes else (w, h)
+
+        curr = prev_id
+
+
 def _build_node_snippet(
     node: ConnectorNode,
     recordings_dir: Path,
     attach_probe: bool,
     preview_sink_names: List[str],
     node_element_names: Dict[str, str],
+    upstream_dims: Optional[Tuple[int, int]] = None,
 ) -> str:
     sid = _safe_id(node.id)
     params = resolve_node_params(node.type, node.params)
@@ -342,12 +380,21 @@ def _build_node_snippet(
         node_element_names[node.id] = el_name
         preview_sink_names.append(el_name)
         width = max(160, int(params["width"]) // 2 * 2)
-        height = max(90, int(round(width * 9 / 16)) // 2 * 2)
         fps = int(params["fps"])
         quality = int(params["quality"])
+        if upstream_dims is not None:
+            src_w, src_h = upstream_dims
+            height = max(64, int(round(width * src_h / src_w)) // 2 * 2)
+            scale_chain = (
+                f"videoconvert ! videoscale ! videorate ! "
+                f"video/x-raw,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1"
+            )
+        else:
+            # Dynamic network/file source without a fixed upstream scaler:
+            # preserve the source's native resolution and aspect ratio exactly.
+            scale_chain = f"videoconvert ! videorate ! video/x-raw,framerate={fps}/1"
         return (
-            f"videoconvert ! videoscale add-borders=true ! videorate ! "
-            f"video/x-raw,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 ! "
+            f"{scale_chain} ! "
             f"jpegenc quality={quality} ! "
             f"appsink name={el_name} emit-signals=true max-buffers=2 drop=true sync=false"
         )
@@ -468,6 +515,7 @@ def compile_channel_pipeline(
             attach_probe=attach_probe,
             preview_sink_names=preview_sink_names,
             node_element_names=node_element_names,
+            upstream_dims=_infer_upstream_dimensions(node.id, node_map, incoming),
         )
         chain_parts: List[str] = [prefix, snippet] if prefix else [snippet]
 
@@ -501,6 +549,7 @@ def compile_channel_pipeline(
                     attach_probe=False,
                     preview_sink_names=preview_sink_names,
                     node_element_names=node_element_names,
+                    upstream_dims=_infer_upstream_dimensions(tgt_node.id, node_map, incoming),
                 )
                 chain_parts.append(tgt_snippet)
                 curr_id = target_id

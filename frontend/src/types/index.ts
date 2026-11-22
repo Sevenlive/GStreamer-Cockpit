@@ -78,6 +78,8 @@ export interface ChannelTelemetry {
   dropped_frames: number;
   active_outputs: number;
   has_preview: boolean;
+  preview_width?: number | null;
+  preview_height?: number | null;
   error_message?: string | null;
 }
 

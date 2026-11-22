@@ -149,6 +149,53 @@ class TestPipelineBuilder(unittest.TestCase):
         self.assertNotIn("timeoverlay", compiled_off.pipeline_description)
         self.assertNotIn("clockoverlay", compiled_off.pipeline_description)
 
+    def test_web_preview_preserves_feed_aspect_ratio(self) -> None:
+        # 4:3 source -> 640x480 preview
+        ch_43 = VirtualChannel(
+            id="ch-43",
+            name="4:3 Feed",
+            nodes=[
+                ConnectorNode(id="in1", type="videotestsrc", label="4:3", params={"width": 800, "height": 600}),
+                ConnectorNode(id="prev", type="web_preview", label="Preview", params={"width": 640, "fps": 10}),
+            ],
+            edges=[ConnectorEdge(id="e1", source="in1", target="prev")],
+        )
+        comp_43 = compile_channel_pipeline(ch_43, self.rec_dir)
+        self.assertTrue(comp_43.is_valid)
+        self.assertIn("width=640,height=480,pixel-aspect-ratio=1/1", comp_43.pipeline_description)
+
+        # 16:9 source rotated 90 deg -> 9:16 vertical preview (640x1138)
+        ch_vert = VirtualChannel(
+            id="ch-vert",
+            name="Vertical",
+            nodes=[
+                ConnectorNode(id="in1", type="videotestsrc", label="16:9", params={"width": 1280, "height": 720}),
+                ConnectorNode(id="rot", type="video_balance", label="Rotate", params={"flip_method": "clockwise"}),
+                ConnectorNode(id="prev", type="web_preview", label="Preview", params={"width": 640, "fps": 10}),
+            ],
+            edges=[
+                ConnectorEdge(id="e1", source="in1", target="rot"),
+                ConnectorEdge(id="e2", source="rot", target="prev"),
+            ],
+        )
+        comp_vert = compile_channel_pipeline(ch_vert, self.rec_dir)
+        self.assertTrue(comp_vert.is_valid)
+        self.assertIn("width=640,height=1138,pixel-aspect-ratio=1/1", comp_vert.pipeline_description)
+
+        # Dynamic RTSP without fixed scaler -> preserves native resolution/aspect ratio
+        ch_rtsp = VirtualChannel(
+            id="ch-rtsp",
+            name="Dynamic RTSP",
+            nodes=[
+                ConnectorNode(id="in1", type="rtsp_ingest", label="Cam"),
+                ConnectorNode(id="prev", type="web_preview", label="Preview", params={"width": 640, "fps": 10}),
+            ],
+            edges=[ConnectorEdge(id="e1", source="in1", target="prev")],
+        )
+        comp_rtsp = compile_channel_pipeline(ch_rtsp, self.rec_dir)
+        self.assertTrue(comp_rtsp.is_valid)
+        self.assertNotIn("videoscale", comp_rtsp.pipeline_description)
+
 
 if __name__ == "__main__":
     unittest.main()

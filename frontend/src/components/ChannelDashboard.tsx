@@ -103,9 +103,14 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
           const isBusy = busyChannelId === channel.id;
           const hasErrors = validation_errors.length > 0;
 
+          const aspectStyle: React.CSSProperties =
+            isRunning && telemetry.preview_width && telemetry.preview_height
+              ? { aspectRatio: `${telemetry.preview_width} / ${telemetry.preview_height}` }
+              : {};
+
           return (
             <article key={channel.id} className="channel-card">
-              <div className="channel-monitor">
+              <div className="channel-monitor" style={aspectStyle}>
                 {isRunning && telemetry.has_preview ? (
                   <img
                     key={`${channel.id}-${channel.updated_at}`}

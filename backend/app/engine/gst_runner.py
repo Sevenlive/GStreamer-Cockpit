@@ -60,6 +60,8 @@ class GstChannelRunner(ChannelRunner):
         self._lock = threading.Lock()
         self._started_at: Optional[float] = None
         self._latest_frame: Optional[bytes] = None
+        self._preview_width: Optional[int] = None
+        self._preview_height: Optional[int] = None
         self._frames_total = 0
         self._window_frames = 0
         self._window_bytes = 0
@@ -176,6 +178,15 @@ class GstChannelRunner(ChannelRunner):
         sample = appsink.emit("pull-sample")
         if sample is None:
             return Gst.FlowReturn.OK
+        caps = sample.get_caps()
+        frame_w: Optional[int] = None
+        frame_h: Optional[int] = None
+        if caps is not None and caps.get_size() > 0:
+            struct = caps.get_structure(0)
+            ok_w, w_val = struct.get_int("width")
+            ok_h, h_val = struct.get_int("height")
+            if ok_w and ok_h and w_val > 0 and h_val > 0:
+                frame_w, frame_h = w_val, h_val
         buf = sample.get_buffer()
         if buf is None:
             return Gst.FlowReturn.OK
@@ -184,6 +195,9 @@ class GstChannelRunner(ChannelRunner):
             try:
                 with self._lock:
                     self._latest_frame = bytes(map_info.data)
+                    if frame_w and frame_h:
+                        self._preview_width = frame_w
+                        self._preview_height = frame_h
             finally:
                 buf.unmap(map_info)
         return Gst.FlowReturn.OK
@@ -257,6 +271,8 @@ class GstChannelRunner(ChannelRunner):
                 dropped_frames=0,
                 active_outputs=self.compiled.active_output_count if self._state == ChannelState.RUNNING else 0,
                 has_preview=len(self.compiled.preview_sink_names) > 0,
+                preview_width=self._preview_width if self._state == ChannelState.RUNNING else None,
+                preview_height=self._preview_height if self._state == ChannelState.RUNNING else None,
                 error_message=self._error_message,
             )
 
