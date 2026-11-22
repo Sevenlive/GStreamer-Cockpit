@@ -115,7 +115,11 @@ export const PipelineDrawer: React.FC<PipelineDrawerProps> = ({ snapshot }) => {
               <div className="drawer-preview-box">
                 {isRunning && snapshot.telemetry.has_preview ? (
                   <img
-                    src={api.previewStreamUrl(snapshot.channel.id)}
+                    key={`${snapshot.channel.id}-${snapshot.channel.updated_at}`}
+                    src={api.previewStreamUrl(
+                      snapshot.channel.id,
+                      snapshot.channel.updated_at
+                    )}
                     alt={`${snapshot.channel.name} monitor`}
                   />
                 ) : (

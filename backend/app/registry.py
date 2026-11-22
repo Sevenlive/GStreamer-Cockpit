@@ -189,7 +189,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
             outputs=[PortSpec(id="out", label="Video Out", media_type="video")],
             params=[
                 ParamSpec(name="text", label="Overlay Text", type="string", default="LIVE • CH-01", live_updatable=True),
-                ParamSpec(name="font_desc", label="Text Font", type="string", default="Sans Bold, 24", live_updatable=True),
+                ParamSpec(name="font_desc", label="Text Font", type="string", default="DejaVu Sans Bold 24", live_updatable=True),
                 ParamSpec(
                     name="valignment",
                     label="Text Vertical Align",
@@ -249,7 +249,7 @@ def _build_registry() -> Dict[str, ConnectorDefinition]:
                     name="timecode_font_desc",
                     label="Timecode Font",
                     type="string",
-                    default="Monospace Bold, 18",
+                    default="DejaVu Sans Mono Bold 18",
                     live_updatable=True,
                 ),
                 ParamSpec(

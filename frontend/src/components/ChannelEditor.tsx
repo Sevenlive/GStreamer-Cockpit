@@ -357,8 +357,13 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
             <button
               type="button"
               className="btn btn-start btn-sm"
-              disabled={isBusy || snapshot.validation_errors.length > 0}
-              onClick={() => onStart(snapshot.channel.id)}
+              disabled={isBusy || saving || (!dirty && snapshot.validation_errors.length > 0)}
+              onClick={async () => {
+                if (dirty) {
+                  await handleSave();
+                }
+                onStart(snapshot.channel.id);
+              }}
             >
               <Play size={14} />
               Start Channel

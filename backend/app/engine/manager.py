@@ -348,8 +348,19 @@ class EngineManager:
             ch.nodes = nodes
             ch.edges = edges
             ch.updated_at = utc_now_iso()
-            self._compiled[channel_id] = compile_channel_pipeline(ch, self.recordings_dir)
+            compiled = compile_channel_pipeline(ch, self.recordings_dir)
+            self._compiled[channel_id] = compiled
             self._persist()
+
+            # If channel is currently running, hot-restart with the newly compiled graph
+            existing = self._runners.get(channel_id)
+            if existing is not None and existing.get_telemetry().state == ChannelState.RUNNING:
+                existing.stop()
+                if compiled.is_valid:
+                    runner = self._create_runner(ch, compiled)
+                    self._runners[channel_id] = runner
+                    runner.start()
+
             self._notify(channel_id, "graph_updated")
             return self.get_snapshot(channel_id)
 

@@ -176,7 +176,7 @@ def _build_node_snippet(
         fps = int(params["framerate"])
         method = str(params["method"])
         return (
-            f"videoscale name={el_name} method={method} ! "
+            f"videoconvert ! videoscale name={el_name} method={method} ! "
             f"videorate ! "
             f"video/x-raw,width={w},height={h},framerate={fps}/1 ! "
             f"videoconvert"
@@ -186,15 +186,16 @@ def _build_node_snippet(
         el_name = f"text_{sid}"
         node_element_names[node.id] = el_name
         text = _gst_quote(str(params["text"]))
-        font_desc = _gst_quote(str(params["font_desc"]))
+        font_desc = _gst_quote(str(params.get("font_desc") or "DejaVu Sans Bold 24").replace(",", ""))
         valign = str(params["valignment"])
         halign = str(params["halignment"])
         shaded = _bool_str(bool(params["shaded_background"]))
         chain = [
             "videoconvert",
+            "video/x-raw,format=I420",
             f"textoverlay name={el_name} text={text} font-desc={font_desc} "
             f"valignment={valign} halignment={halign} shaded-background={shaded} "
-            f"xpad=16 ypad=12",
+            f"xpad=16 ypad=12 silent=false",
         ]
 
         # Backward compatibility for saved channels using legacy show_timecode boolean
@@ -203,7 +204,9 @@ def _build_node_snippet(
             tc_mode = "running-time" if bool(node.params["show_timecode"]) else "off"
 
         if tc_mode != "off":
-            tc_font = _gst_quote(str(params.get("timecode_font_desc", "Monospace Bold, 18")))
+            tc_font = _gst_quote(
+                str(params.get("timecode_font_desc") or "DejaVu Sans Mono Bold 18").replace(",", "")
+            )
             tc_valign = str(params.get("timecode_valignment", "bottom"))
             tc_halign = str(params.get("timecode_halignment", "right"))
             tc_shaded = _bool_str(bool(params.get("timecode_shaded", True)))
@@ -214,15 +217,18 @@ def _build_node_snippet(
                 chain.append(
                     f"clockoverlay name=time_{sid} time-format={tc_fmt} text={tc_prefix} "
                     f"valignment={tc_valign} halignment={tc_halign} "
-                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12"
+                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent=false"
                 )
             else:
                 chain.append(
                     f"timeoverlay name=time_{sid} time-mode={tc_mode} text={tc_prefix} "
                     f"valignment={tc_valign} halignment={tc_halign} "
-                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12"
+                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12 silent=false"
                 )
 
+        # Force plain video/x-raw without GstVideoOverlayCompositionMeta so text is always
+        # blended directly into frame pixels before tee, videoscale, jpegenc, or encoders.
+        chain.append("video/x-raw,format=I420")
         chain.append("videoconvert")
         return " ! ".join(chain)
 
@@ -235,8 +241,9 @@ def _build_node_snippet(
         hue = float(params["hue"])
         flip = str(params["flip_method"])
         chain = [
+            "videoconvert",
             f"videobalance name={el_name} brightness={brightness:.2f} "
-            f"contrast={contrast:.2f} saturation={saturation:.2f} hue={hue:.2f}"
+            f"contrast={contrast:.2f} saturation={saturation:.2f} hue={hue:.2f}",
         ]
         if flip != "none":
             chain.append(f"videoflip name=flip_{sid} method={flip}")

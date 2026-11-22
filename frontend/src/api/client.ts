@@ -81,8 +81,10 @@ export const api = {
   deleteChannel: (id: string) =>
     request<void>(`/api/channels/${id}`, { method: "DELETE" }),
 
-  previewStreamUrl: (channelId: string, cacheBust?: number) =>
-    `/api/channels/${channelId}/preview.mjpeg${cacheBust ? `?t=${cacheBust}` : ""}`,
+  previewStreamUrl: (channelId: string, cacheBust?: string | number) =>
+    `/api/channels/${channelId}/preview.mjpeg${
+      cacheBust ? `?v=${encodeURIComponent(String(cacheBust))}` : ""
+    }`,
 };
 
 export function connectTelemetryWebSocket(

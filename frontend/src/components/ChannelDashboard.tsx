@@ -108,7 +108,8 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
               <div className="channel-monitor">
                 {isRunning && telemetry.has_preview ? (
                   <img
-                    src={api.previewStreamUrl(channel.id)}
+                    key={`${channel.id}-${channel.updated_at}`}
+                    src={api.previewStreamUrl(channel.id, channel.updated_at)}
                     alt={`${channel.name} live preview`}
                   />
                 ) : (
