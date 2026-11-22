@@ -1107,3 +1107,39 @@ textarea {
   border: 1px solid var(--border-subtle) !important;
   border-radius: var(--radius-sm) !important;
 }
+
+.edge-delete-wrap {
+  position: absolute;
+  pointer-events: all;
+  opacity: 0.72;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.edge-delete-wrap:hover,
+.edge-delete-wrap.visible {
+  opacity: 1;
+}
+
+.edge-delete-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.edge-delete-btn:hover,
+.edge-delete-wrap.visible .edge-delete-btn {
+  background: var(--accent-danger);
+  border-color: var(--accent-danger);
+  color: #ffffff;
+}

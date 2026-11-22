@@ -10,11 +10,11 @@ import {
   useEdgesState,
   useNodesState,
   type Connection,
-  type Edge,
+  type EdgeTypes,
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Play, RotateCw, Save, Square } from "lucide-react";
+import { Play, RotateCw, Save, Square, Unlink } from "lucide-react";
 
 import type {
   ChannelSnapshot,
@@ -24,11 +24,16 @@ import type {
 } from "../types";
 import { ConnectorNode, type GstFlowNode } from "./ConnectorNode";
 import { ConnectorPalette } from "./ConnectorPalette";
+import { DeletableEdge, type GstFlowEdge } from "./DeletableEdge";
 import { InspectorPanel } from "./InspectorPanel";
 import { PipelineDrawer } from "./PipelineDrawer";
 
 const NODE_TYPES: NodeTypes = {
   connector: ConnectorNode,
+};
+
+const EDGE_TYPES: EdgeTypes = {
+  deletable: DeletableEdge,
 };
 
 interface ChannelEditorProps {
@@ -75,10 +80,20 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<GstFlowNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GstFlowEdge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const handleDeleteEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((prev) => prev.filter((e) => e.id !== edgeId));
+      setSelectedEdgeId((curr) => (curr === edgeId ? null : curr));
+      setDirty(true);
+    },
+    [setEdges]
+  );
 
   // Hydrate React Flow graph whenever switching channels
   useEffect(() => {
@@ -95,8 +110,9 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
       },
     }));
 
-    const flowEdges: Edge[] = snapshot.channel.edges.map((e) => ({
+    const flowEdges: GstFlowEdge[] = snapshot.channel.edges.map((e) => ({
       id: e.id,
+      type: "deletable",
       source: e.source,
       sourceHandle: e.source_handle || "out",
       target: e.target,
@@ -104,13 +120,15 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
       animated: snapshot.telemetry.state === "running",
       style: { stroke: "#5c7089", strokeWidth: 2 },
       markerEnd: { type: MarkerType.ArrowClosed, color: "#5c7089" },
+      data: { onDelete: handleDeleteEdge },
     }));
 
     setNodes(flowNodes);
     setEdges(flowEdges);
     setSelectedNodeId(null);
+    setSelectedEdgeId(null);
     setDirty(false);
-  }, [snapshot?.channel.id, defMap, setNodes, setEdges]);
+  }, [snapshot?.channel.id, defMap, setNodes, setEdges, handleDeleteEdge]);
 
   // Animate edges when running state changes without clobbering unsaved edits
   useEffect(() => {
@@ -150,6 +168,7 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
     (changes: Parameters<typeof onEdgesChange>[0]) => {
       onEdgesChange(changes);
       if (changes.some((ch) => ch.type === "remove")) {
+        setSelectedEdgeId(null);
         setDirty(true);
       }
     },
@@ -164,19 +183,21 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
           {
             ...connection,
             id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            type: "deletable",
             animated: running,
             style: { stroke: running ? "#22b8cf" : "#5c7089", strokeWidth: 2 },
             markerEnd: {
               type: MarkerType.ArrowClosed,
               color: running ? "#22b8cf" : "#5c7089",
             },
+            data: { onDelete: handleDeleteEdge },
           },
           eds
         )
       );
       setDirty(true);
     },
-    [setEdges, snapshot?.telemetry.state]
+    [setEdges, snapshot?.telemetry.state, handleDeleteEdge]
   );
 
   const handleAddConnector = useCallback(
@@ -342,6 +363,17 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
         </div>
 
         <div className="editor-toolbar-right">
+          {selectedEdgeId && (
+            <button
+              type="button"
+              className="btn btn-stop btn-sm"
+              onClick={() => handleDeleteEdge(selectedEdgeId)}
+            >
+              <Unlink size={14} />
+              Disconnect
+            </button>
+          )}
+
           <button
             id="btn-save-graph"
             type="button"
@@ -404,11 +436,23 @@ export const ChannelEditor: React.FC<ChannelEditorProps> = ({
             nodes={nodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
-            onNodeClick={(_e, node) => setSelectedNodeId(node.id)}
-            onPaneClick={() => setSelectedNodeId(null)}
+            onNodeClick={(_e, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedEdgeId(null);
+            }}
+            onEdgeClick={(_e, edge) => {
+              setSelectedEdgeId(edge.id);
+              setSelectedNodeId(null);
+            }}
+            onEdgeDoubleClick={(_e, edge) => handleDeleteEdge(edge.id)}
+            onPaneClick={() => {
+              setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+            }}
             fitView
             colorMode="dark"
             deleteKeyCode={["Backspace", "Delete"]}
