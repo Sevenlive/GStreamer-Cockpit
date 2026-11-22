@@ -344,38 +344,75 @@ class EngineManager:
         nodes: List[ConnectorNode],
         edges: List[ConnectorEdge],
     ) -> ChannelSnapshot:
+        from ..models import ConnectorCategory
+        from ..registry import resolve_node_params
+
         with self._lock:
             if channel_id not in self._channels:
                 raise KeyError(f"Channel '{channel_id}' not found.")
             ch = self._channels[channel_id]
             old_nodes = {n.id: n for n in ch.nodes}
+            new_nodes = {n.id: n for n in nodes}
             old_edge_sigs = {(e.source, e.source_handle, e.target, e.target_handle) for e in ch.edges}
             new_edge_sigs = {(e.source, e.source_handle, e.target, e.target_handle) for e in edges}
 
-            # Detect whether topology or any non-live parameter changed
-            needs_restart = (
-                set(old_nodes.keys()) != {n.id for n in nodes}
+            def _is_output(node: ConnectorNode) -> bool:
+                d = get_connector_definition(node.type)
+                return d is not None and d.category == ConnectorCategory.OUTPUT
+
+            old_outputs = {nid: n for nid, n in old_nodes.items() if _is_output(n)}
+            new_outputs = {nid: n for nid, n in new_nodes.items() if _is_output(n)}
+
+            outputs_changed = set(old_outputs.keys()) != set(new_outputs.keys())
+            source_changed = (
+                (set(old_nodes.keys()) - set(old_outputs.keys()))
+                != (set(new_nodes.keys()) - set(new_outputs.keys()))
                 or old_edge_sigs != new_edge_sigs
             )
             live_updates: List[tuple[str, str, Any]] = []
 
-            if not needs_restart:
-                for n in nodes:
-                    prev = old_nodes[n.id]
-                    if prev.type != n.type:
-                        needs_restart = True
+            # Check output param changes (resolved against defaults, ignoring legacy keys)
+            if not outputs_changed:
+                for nid, new_n in new_outputs.items():
+                    prev_n = old_outputs[nid]
+                    if prev_n.type != new_n.type:
+                        outputs_changed = True
                         break
-                    defn = get_connector_definition(n.type)
+                    defn = get_connector_definition(new_n.type)
                     live_keys = {p.name for p in defn.params if p.live_updatable} if defn else set()
-                    all_keys = set(prev.params.keys()) | set(n.params.keys())
-                    for k in all_keys:
-                        if prev.params.get(k) != n.params.get(k):
+                    old_p = resolve_node_params(prev_n.type, prev_n.params)
+                    new_p = resolve_node_params(new_n.type, new_n.params)
+                    for k in (p.name for p in (defn.params if defn else [])):
+                        if old_p.get(k) != new_p.get(k):
                             if k in live_keys:
-                                live_updates.append((n.id, k, n.params.get(k)))
+                                live_updates.append((nid, k, new_p.get(k)))
                             else:
-                                needs_restart = True
+                                outputs_changed = True
                                 break
-                    if needs_restart:
+                    if outputs_changed:
+                        break
+
+            # Check source/transform param changes
+            if not source_changed:
+                for nid, new_n in new_nodes.items():
+                    if nid in new_outputs:
+                        continue
+                    prev_n = old_nodes.get(nid)
+                    if prev_n is None or prev_n.type != new_n.type:
+                        source_changed = True
+                        break
+                    defn = get_connector_definition(new_n.type)
+                    live_keys = {p.name for p in defn.params if p.live_updatable} if defn else set()
+                    old_p = resolve_node_params(prev_n.type, prev_n.params)
+                    new_p = resolve_node_params(new_n.type, new_n.params)
+                    for k in (p.name for p in (defn.params if defn else [])):
+                        if old_p.get(k) != new_p.get(k):
+                            if k in live_keys:
+                                live_updates.append((nid, k, new_p.get(k)))
+                            else:
+                                source_changed = True
+                                break
+                    if source_changed:
                         break
 
             ch.nodes = nodes
@@ -387,12 +424,26 @@ class EngineManager:
 
             existing = self._runners.get(channel_id)
             if existing is not None and existing.get_telemetry().state == ChannelState.RUNNING:
-                if not needs_restart:
-                    # Apply live changes seamlessly without interrupting the stream
+                if not outputs_changed and not source_changed:
+                    # Pure live-param / layout edit -> zero restart
                     existing.channel = ch
                     for nid, k, v in live_updates:
                         existing.update_live_param(nid, k, v)
+                elif not outputs_changed and source_changed and compiled.is_valid:
+                    # Only inputs/transforms changed -> hot-swap Stage 1 without restarting recording/outputs!
+                    swapped = existing.hot_swap_source(ch, compiled)
+                    if swapped:
+                        for nid, k, v in live_updates:
+                            if nid in new_outputs:
+                                existing.update_live_param(nid, k, v)
+                    else:
+                        existing.stop()
+                        self._run_ids[channel_id] = self._run_ids.get(channel_id, 0) + 1
+                        runner = self._create_runner(ch, compiled)
+                        self._runners[channel_id] = runner
+                        runner.start()
                 else:
+                    # Outputs themselves changed -> full restart
                     existing.stop()
                     if compiled.is_valid:
                         self._run_ids[channel_id] = self._run_ids.get(channel_id, 0) + 1

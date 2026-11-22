@@ -134,6 +134,16 @@ class SimChannelRunner(ChannelRunner):
         self._log(LogLevel.INFO, f"node:{node_id}", f"Live updated {param_name}={value!r}")
         return True
 
+    def hot_swap_source(self, channel: VirtualChannel, compiled: CompiledPipeline) -> bool:
+        if self._state != ChannelState.RUNNING:
+            return False
+        with self._lock:
+            self.channel = channel
+            self.compiled = compiled
+            self._target_fps = self._infer_target_fps()
+        self._log(LogLevel.INFO, "sim-engine", "Hot-swapped ingest/transform stage without restarting outputs.")
+        return True
+
     def _render_preview_frame(self, elapsed: float, frame_idx: int) -> bytes:
         w = int(self._get_node_param("web_preview", "width", 640))
         w = max(240, min(w, 960))

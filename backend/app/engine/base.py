@@ -57,3 +57,7 @@ class ChannelRunner(ABC):
     def update_live_param(self, node_id: str, param_name: str, value: Any) -> bool:
         """Attempt to update a parameter on a running pipeline without restart."""
         return False
+
+    def hot_swap_source(self, channel: VirtualChannel, compiled: CompiledPipeline) -> bool:
+        """Hot-swap only the ingest/transform stage while keeping outputs/recordings running."""
+        return False

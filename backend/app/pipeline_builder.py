@@ -22,6 +22,9 @@ class CompiledPipeline:
     probe_element_name: Optional[str] = None
     active_output_count: int = 0
     node_element_names: Dict[str, str] = field(default_factory=dict)
+    source_pipeline_description: Optional[str] = None
+    output_pipeline_description: Optional[str] = None
+    bus_channel: Optional[str] = None
 
     @property
     def is_valid(self) -> bool:
@@ -580,6 +583,154 @@ def compile_channel_pipeline(
             emit_from_node(inp.id)
 
     pipeline_str = " \\\n  ".join(branches)
+
+    # Compile 2-stage decoupled pipelines (intervideosink -> intervideosrc) when all
+    # connected outputs share a single upstream program-bus feeder node. This allows
+    # hot-swapping inputs and transforms on the fly WITHOUT restarting recordings or streams!
+    source_pipeline_str: Optional[str] = None
+    output_pipeline_str: Optional[str] = None
+    bus_channel: Optional[str] = None
+
+    bus_feeders = {
+        edge.source
+        for out in connected_outputs
+        for edge in incoming.get(out.id, [])
+    }
+    output_ids = {o.id for o in connected_outputs}
+
+    if len(bus_feeders) == 1:
+        feeder_id = next(iter(bus_feeders))
+        # Ensure feeder doesn't also feed a non-output branch that isn't part of outputs
+        feeder_non_output_edges = [e for e in outgoing.get(feeder_id, []) if e.target not in output_ids]
+        if not feeder_non_output_edges:
+            bus_channel = f"cockpit_{_safe_id(channel.id)}"
+            bus_dims = _infer_upstream_dimensions(connected_outputs[0].id, node_map, incoming) or (1280, 720)
+            bus_w, bus_h = max(160, bus_dims[0] // 2 * 2), max(120, bus_dims[1] // 2 * 2)
+            bus_fps = 30
+            for n in channel.nodes:
+                if n.type in ("video_scale", "videotestsrc"):
+                    p = resolve_node_params(n.type, n.params)
+                    bus_fps = int(p.get("framerate", 30))
+                    if n.type == "video_scale":
+                        break
+
+            # Build Stage 1 (Source & Transforms -> intervideosink)
+            src_branches: List[str] = []
+            src_emitted_multi: Set[str] = set()
+            src_probe_attached = False
+            tmp_preview_sinks: List[str] = []
+            tmp_elem_names: Dict[str, str] = {}
+
+            bus_sink_tail = (
+                f"videoconvert ! videoscale add-borders=true ! videorate ! "
+                f"video/x-raw,format=I420,width={bus_w},height={bus_h},framerate={bus_fps}/1 ! "
+                f"intervideosink name=bus_sink channel={bus_channel} sync=false"
+            )
+
+            def emit_src(nid: str, pref: str = "") -> None:
+                nonlocal src_probe_attached
+                n_obj = node_map[nid]
+                d_obj = get_connector_definition(n_obj.type)
+                attach_p = False
+                if not src_probe_attached and d_obj and d_obj.category == ConnectorCategory.INPUT:
+                    attach_p = True
+                    src_probe_attached = True
+                snip = _build_node_snippet(
+                    node=n_obj,
+                    recordings_dir=recordings_dir,
+                    attach_probe=attach_p,
+                    preview_sink_names=tmp_preview_sinks,
+                    node_element_names=tmp_elem_names,
+                    upstream_dims=_infer_upstream_dimensions(nid, node_map, incoming),
+                )
+                parts = [pref, snip] if pref else [snip]
+                curr = nid
+                while True:
+                    if curr == feeder_id:
+                        parts.append(bus_sink_tail)
+                        src_branches.append(" ! ".join(parts))
+                        return
+                    eds = [e for e in outgoing.get(curr, []) if e.target not in output_ids]
+                    if not eds:
+                        return
+                    if len(eds) == 1:
+                        e0 = eds[0]
+                        tid = e0.target
+                        if tid in multi_input_nodes:
+                            pidx = "1" if e0.target_handle == "in_1" else "0"
+                            cname = f"comp_{_safe_id(tid)}"
+                            parts.append(f"queue leaky=downstream max-size-buffers=4 ! {cname}.sink_{pidx}")
+                            src_branches.append(" ! ".join(parts))
+                            if tid not in src_emitted_multi:
+                                src_emitted_multi.add(tid)
+                                emit_src(tid)
+                            return
+                        tnode = node_map[tid]
+                        tsnip = _build_node_snippet(
+                            node=tnode,
+                            recordings_dir=recordings_dir,
+                            attach_probe=False,
+                            preview_sink_names=tmp_preview_sinks,
+                            node_element_names=tmp_elem_names,
+                            upstream_dims=_infer_upstream_dimensions(tid, node_map, incoming),
+                        )
+                        parts.append(tsnip)
+                        curr = tid
+                    else:
+                        tname = f"tee_{_safe_id(curr)}"
+                        parts.append(f"tee name={tname}")
+                        src_branches.append(" ! ".join(parts))
+                        for ed in eds:
+                            tid = ed.target
+                            bpref = f"{tname}. ! queue leaky=downstream max-size-buffers=4"
+                            if tid in multi_input_nodes:
+                                pidx = "1" if ed.target_handle == "in_1" else "0"
+                                cname = f"comp_{_safe_id(tid)}"
+                                src_branches.append(f"{bpref} ! {cname}.sink_{pidx}")
+                                if tid not in src_emitted_multi:
+                                    src_emitted_multi.add(tid)
+                                    emit_src(tid)
+                            else:
+                                emit_src(tid, pref=bpref)
+                        return
+
+            for inp in inputs:
+                if outgoing.get(inp.id):
+                    emit_src(inp.id)
+
+            # Build Stage 2 (intervideosrc -> Output Bus)
+            out_head = (
+                f"intervideosrc name=bus_src channel={bus_channel} timeout=5000000000 ! "
+                f"video/x-raw,format=I420,width={bus_w},height={bus_h},framerate={bus_fps}/1"
+            )
+            out_branches: List[str] = []
+            if len(connected_outputs) == 1:
+                o_snip = _build_node_snippet(
+                    node=connected_outputs[0],
+                    recordings_dir=recordings_dir,
+                    attach_probe=False,
+                    preview_sink_names=tmp_preview_sinks,
+                    node_element_names=tmp_elem_names,
+                    upstream_dims=(bus_w, bus_h),
+                )
+                out_branches.append(f"{out_head} ! {o_snip}")
+            else:
+                out_branches.append(f"{out_head} ! tee name=bus_tee")
+                for out_node in connected_outputs:
+                    o_snip = _build_node_snippet(
+                        node=out_node,
+                        recordings_dir=recordings_dir,
+                        attach_probe=False,
+                        preview_sink_names=tmp_preview_sinks,
+                        node_element_names=tmp_elem_names,
+                        upstream_dims=(bus_w, bus_h),
+                    )
+                    out_branches.append(f"bus_tee. ! queue leaky=downstream max-size-buffers=4 ! {o_snip}")
+
+            if src_branches and out_branches:
+                source_pipeline_str = " \\\n  ".join(src_branches)
+                output_pipeline_str = " \\\n  ".join(out_branches)
+
     return CompiledPipeline(
         pipeline_description=pipeline_str,
         validation_errors=[],
@@ -587,4 +738,7 @@ def compile_channel_pipeline(
         probe_element_name="telemetry_probe" if probe_attached else None,
         active_output_count=len(connected_outputs),
         node_element_names=node_element_names,
+        source_pipeline_description=source_pipeline_str,
+        output_pipeline_description=output_pipeline_str,
+        bus_channel=bus_channel,
     )

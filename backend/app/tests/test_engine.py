@@ -84,6 +84,35 @@ class TestEngineManager(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.manager.get_snapshot(cid)
 
+    def test_hot_swap_transform_keeps_recording_running(self) -> None:
+        from app.models import ConnectorEdge, ConnectorNode
+
+        snap = self.manager.start_channel("ch-01")
+        initial_run_id = snap.telemetry.run_id
+        self.assertEqual(initial_run_id, 1)
+
+        # Verify 2-stage intervideosink/intervideosrc compilation
+        compiled = self.manager._compiled["ch-01"]
+        self.assertIsNotNone(compiled.source_pipeline_description)
+        self.assertIsNotNone(compiled.output_pipeline_description)
+        self.assertIn("intervideosink", compiled.source_pipeline_description or "")
+        self.assertIn("intervideosrc", compiled.output_pipeline_description or "")
+
+        # Insert a new video_balance transform between tr_overlay and the two outputs while running
+        nodes = list(snap.channel.nodes) + [
+            ConnectorNode(id="tr_bal", type="video_balance", label="Color", params={"saturation": 0.2})
+        ]
+        edges = [
+            ConnectorEdge(id="e1", source="in_test", target="tr_overlay"),
+            ConnectorEdge(id="e_bal", source="tr_overlay", target="tr_bal"),
+            ConnectorEdge(id="e2", source="tr_bal", target="out_preview"),
+            ConnectorEdge(id="e3", source="tr_bal", target="out_rec"),
+        ]
+        updated = self.manager.update_channel_graph("ch-01", nodes, edges)
+        # run_id MUST stay 1 (recording/outputs were NOT restarted!)
+        self.assertEqual(updated.telemetry.run_id, initial_run_id)
+        self.assertEqual(updated.telemetry.state, ChannelState.RUNNING)
+
 
 if __name__ == "__main__":
     unittest.main()
