@@ -341,12 +341,13 @@ def _build_node_snippet(
         el_name = f"preview_sink_{sid}"
         node_element_names[node.id] = el_name
         preview_sink_names.append(el_name)
-        width = int(params["width"])
+        width = max(160, int(params["width"]) // 2 * 2)
+        height = max(90, int(round(width * 9 / 16)) // 2 * 2)
         fps = int(params["fps"])
         quality = int(params["quality"])
         return (
-            f"videoconvert ! videoscale ! videorate ! "
-            f"video/x-raw,width={width},framerate={fps}/1 ! "
+            f"videoconvert ! videoscale add-borders=true ! videorate ! "
+            f"video/x-raw,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 ! "
             f"jpegenc quality={quality} ! "
             f"appsink name={el_name} emit-signals=true max-buffers=2 drop=true sync=false"
         )
