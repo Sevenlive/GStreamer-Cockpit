@@ -215,10 +215,23 @@ class GstChannelRunner(ChannelRunner):
         el_name = self.compiled.node_element_names.get(node_id)
         if not el_name:
             return False
+
+        gst_prop = param_name.replace("_", "-")
+        # Route timecode_* parameters to the companion timeoverlay/clockoverlay element
+        if param_name.startswith("timecode_") and el_name.startswith("text_"):
+            el_name = "time_" + el_name[len("text_"):]
+            tc_prop_map = {
+                "timecode_prefix": "text",
+                "timecode_font_desc": "font-desc",
+                "timecode_valignment": "valignment",
+                "timecode_halignment": "halignment",
+                "timecode_shaded": "shaded-background",
+            }
+            gst_prop = tc_prop_map.get(param_name, gst_prop)
+
         element = self._pipeline.get_by_name(el_name)
         if element is None:
             return False
-        gst_prop = param_name.replace("_", "-")
         try:
             element.set_property(gst_prop, value)
             self._log(LogLevel.INFO, el_name, f"Live updated {gst_prop}={value!r}")

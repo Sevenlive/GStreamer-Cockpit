@@ -191,14 +191,38 @@ def _build_node_snippet(
         halign = str(params["halignment"])
         shaded = _bool_str(bool(params["shaded_background"]))
         chain = [
+            "videoconvert",
             f"textoverlay name={el_name} text={text} font-desc={font_desc} "
-            f"valignment={valign} halignment={halign} shaded-background={shaded}"
+            f"valignment={valign} halignment={halign} shaded-background={shaded} "
+            f"xpad=16 ypad=12",
         ]
-        if bool(params["show_timecode"]):
-            chain.append(
-                f'timeoverlay name=time_{sid} valignment=bottom halignment=right '
-                f'font-desc="Monospace, 16" shaded-background=true'
-            )
+
+        # Backward compatibility for saved channels using legacy show_timecode boolean
+        tc_mode = str(params.get("timecode_mode", "running-time"))
+        if "timecode_mode" not in node.params and "show_timecode" in node.params:
+            tc_mode = "running-time" if bool(node.params["show_timecode"]) else "off"
+
+        if tc_mode != "off":
+            tc_font = _gst_quote(str(params.get("timecode_font_desc", "Monospace Bold, 18")))
+            tc_valign = str(params.get("timecode_valignment", "bottom"))
+            tc_halign = str(params.get("timecode_halignment", "right"))
+            tc_shaded = _bool_str(bool(params.get("timecode_shaded", True)))
+            tc_prefix = _gst_quote(str(params.get("timecode_prefix", "TC ")))
+
+            if tc_mode == "clock":
+                tc_fmt = _gst_quote(str(params.get("timecode_format", "%Y-%m-%d %H:%M:%S")))
+                chain.append(
+                    f"clockoverlay name=time_{sid} time-format={tc_fmt} text={tc_prefix} "
+                    f"valignment={tc_valign} halignment={tc_halign} "
+                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12"
+                )
+            else:
+                chain.append(
+                    f"timeoverlay name=time_{sid} time-mode={tc_mode} text={tc_prefix} "
+                    f"valignment={tc_valign} halignment={tc_halign} "
+                    f"font-desc={tc_font} shaded-background={tc_shaded} xpad=16 ypad=12"
+                )
+
         chain.append("videoconvert")
         return " ! ".join(chain)
 

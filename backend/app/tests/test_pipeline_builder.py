@@ -107,6 +107,47 @@ class TestPipelineBuilder(unittest.TestCase):
         self.assertIn("splitmuxsink", compiled.pipeline_description)
         self.assertIn("muxer=matroskamux", compiled.pipeline_description)
 
+    def test_timecode_modes_and_clockoverlay(self) -> None:
+        # Wall-clock mode -> clockoverlay with custom format and alignment
+        ch_clock = VirtualChannel(
+            id="ch-clk",
+            name="Clock TC",
+            nodes=[
+                ConnectorNode(id="in1", type="videotestsrc", label="In"),
+                ConnectorNode(
+                    id="txt1",
+                    type="text_overlay",
+                    label="Bug",
+                    params={
+                        "text": "STUDIO A",
+                        "timecode_mode": "clock",
+                        "timecode_prefix": "UTC ",
+                        "timecode_format": "%H:%M:%S",
+                        "timecode_valignment": "top",
+                        "timecode_halignment": "right",
+                    },
+                ),
+                ConnectorNode(id="out1", type="web_preview", label="Prev"),
+            ],
+            edges=[
+                ConnectorEdge(id="e1", source="in1", target="txt1"),
+                ConnectorEdge(id="e2", source="txt1", target="out1"),
+            ],
+        )
+        compiled_clk = compile_channel_pipeline(ch_clock, self.rec_dir)
+        self.assertTrue(compiled_clk.is_valid, compiled_clk.validation_errors)
+        self.assertIn("clockoverlay name=time_txt1", compiled_clk.pipeline_description)
+        self.assertIn('time-format="%H:%M:%S"', compiled_clk.pipeline_description)
+        self.assertIn('text="UTC "', compiled_clk.pipeline_description)
+        self.assertIn("valignment=top halignment=right", compiled_clk.pipeline_description)
+
+        # Off mode -> no timeoverlay or clockoverlay
+        ch_clock.nodes[1].params["timecode_mode"] = "off"
+        compiled_off = compile_channel_pipeline(ch_clock, self.rec_dir)
+        self.assertTrue(compiled_off.is_valid)
+        self.assertNotIn("timeoverlay", compiled_off.pipeline_description)
+        self.assertNotIn("clockoverlay", compiled_off.pipeline_description)
+
 
 if __name__ == "__main__":
     unittest.main()
